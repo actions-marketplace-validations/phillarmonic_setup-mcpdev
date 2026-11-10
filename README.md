@@ -23,14 +23,14 @@ mcpdev inspects, invokes, snapshots, diffs, and replays MCP servers. It was buil
 
 ```yaml
 - name: Setup mcpdev
-  uses: phillarmonic/setup-mcpdev@v0.1.0
+  uses: phillarmonic/setup-mcpdev@v1
 ```
 
 ### Specify Version
 
 ```yaml
 - name: Setup mcpdev
-  uses: phillarmonic/setup-mcpdev@v0.1.0
+  uses: phillarmonic/setup-mcpdev@v1
   with:
     version: 'v0.1.0'
 ```
@@ -39,7 +39,7 @@ mcpdev inspects, invokes, snapshots, diffs, and replays MCP servers. It was buil
 
 ```yaml
 - name: Setup mcpdev
-  uses: phillarmonic/setup-mcpdev@v0.1.0
+  uses: phillarmonic/setup-mcpdev@v1
   with:
     version: 'v0'
 ```
@@ -50,7 +50,7 @@ This resolves to the newest stable `v0.x.y` release. Prefixes with two component
 
 ```yaml
 - name: Setup mcpdev
-  uses: phillarmonic/setup-mcpdev@v0.1.0
+  uses: phillarmonic/setup-mcpdev@v1
   with:
     version: 'latest'
     cache: 'false'
@@ -60,7 +60,7 @@ This resolves to the newest stable `v0.x.y` release. Prefixes with two component
 
 ```yaml
 - name: Setup mcpdev
-  uses: phillarmonic/setup-mcpdev@v0.1.0
+  uses: phillarmonic/setup-mcpdev@v1
   with:
     token: ${{ secrets.GITHUB_TOKEN }}
 ```
@@ -103,7 +103,7 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Setup mcpdev
-        uses: phillarmonic/setup-mcpdev@v0.1.0
+        uses: phillarmonic/setup-mcpdev@v1
         id: mcpdev
 
       - name: Show mcpdev info
@@ -138,7 +138,7 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Setup mcpdev
-        uses: phillarmonic/setup-mcpdev@v0.1.0
+        uses: phillarmonic/setup-mcpdev@v1
 
       - name: Inspect the server under test
         run: mcpdev inspect tools --command ./bin/my-mcp-server
@@ -162,7 +162,7 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Setup mcpdev
-        uses: phillarmonic/setup-mcpdev@v0.1.0
+        uses: phillarmonic/setup-mcpdev@v1
 
       - name: Capture the current interface
         run: mcpdev snapshot --command ./bin/my-mcp-server --out contract.json
@@ -195,7 +195,7 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Setup mcpdev ${{ matrix.mcpdev-version }}
-        uses: phillarmonic/setup-mcpdev@v0.1.0
+        uses: phillarmonic/setup-mcpdev@v1
         with:
           version: ${{ matrix.mcpdev-version }}
 
@@ -272,7 +272,9 @@ If a specific version is not found:
 
 ## Versioning
 
-The action follows the mcpdev release line. `v0.1.0` is the first action release; pin that tag in workflows. The `version` input selects the mcpdev release independently from the action tag, so you can run new action code against an older binary when you need to.
+The action is versioned separately from mcpdev. `v1` tracks the newest 1.x action release and is what the examples pin. For a fully reproducible workflow, pin the exact tag (`v1.0.0`).
+
+The `version` input selects the mcpdev release independently from the action tag, so new action code can install an older mcpdev build when you need that.
 
 ## Contributing
 
