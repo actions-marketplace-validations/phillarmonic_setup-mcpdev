@@ -1,5 +1,7 @@
 # Setup mcpdev GitHub Action
 
+CLI documentation: [phillarmonic.github.io/mcpdev](https://phillarmonic.github.io/mcpdev/)
+
 A GitHub Action to install and setup [the mcpdev cli](https://github.com/phillarmonic/mcpdev) - a direct CLI for MCP servers over stdio and Streamable HTTP.
 
 mcpdev inspects, invokes, snapshots, diffs, and replays MCP servers. It was built as a local debugging tool, but the same interface contract checks are useful in CI: a workflow can inspect a server, compare its catalog against a committed baseline, and fail the build when a tool disappears. This action puts the release binary on `PATH` so those checks run against the exact build the release published.
