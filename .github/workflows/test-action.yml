@@ -1,0 +1,308 @@
+name: Test Setup mcpdev Action
+
+on:
+  push:
+    branches: [ main, master ]
+    paths:
+      - 'action.yml'
+      - '.github/workflows/test-action.yml'
+  pull_request:
+    branches: [ main, master ]
+    paths:
+      - 'action.yml'
+      - '.github/workflows/test-action.yml'
+  workflow_dispatch:
+
+jobs:
+  test-platforms:
+    name: Test on ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Test setup mcpdev (latest)
+        uses: ./
+        id: setup-latest
+        with:
+          version: 'latest'
+
+      - name: Verify mcpdev installation
+        shell: bash
+        run: |
+          echo "Testing mcpdev installation..."
+
+          if ! command -v mcpdev >/dev/null 2>&1; then
+            echo "mcpdev not found in PATH"
+            exit 1
+          fi
+
+          echo "mcpdev found in PATH"
+          mcpdev version
+
+          echo "Action outputs:"
+          echo "  Version: ${{ steps.setup-latest.outputs.version }}"
+          echo "  Path: ${{ steps.setup-latest.outputs.path }}"
+          echo "  Cache hit: ${{ steps.setup-latest.outputs.cache-hit }}"
+
+          requested_version="${{ steps.setup-latest.outputs.version }}"
+          reported_version=$(mcpdev --format json version | jq -r '.result.version')
+          if [[ "$reported_version" != "$requested_version" ]]; then
+            echo "Reported version $reported_version does not match requested $requested_version"
+            exit 1
+          fi
+
+          snapshot_schema=$(mcpdev --format json version | jq -r '.result.snapshot_schema')
+          if [[ "$snapshot_schema" != "1" ]]; then
+            echo "Unexpected snapshot schema: $snapshot_schema"
+            exit 1
+          fi
+
+          mcpdev --help >/dev/null
+          echo "mcpdev --help works"
+
+      - name: Verify exit classes
+        shell: bash
+        run: |
+          # A connection that cannot start is connection class (10), not a crash.
+          set +e
+          mcpdev inspect tools --command /definitely-not-a-command >/dev/null 2>&1
+          code=$?
+          set -e
+
+          echo "inspect with a missing command exited $code"
+          if [[ "$code" != "10" ]]; then
+            echo "Expected exit class 10 for a missing command"
+            exit 1
+          fi
+
+  test-versions:
+    name: Test version ${{ matrix.version }} on Ubuntu
+    strategy:
+      fail-fast: false
+      matrix:
+        version: ['v0.1.0', 'latest']
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Test setup mcpdev (${{ matrix.version }})
+        uses: ./
+        id: setup-version
+        with:
+          version: ${{ matrix.version }}
+
+      - name: Verify installation
+        run: |
+          echo "Testing mcpdev ${{ matrix.version }}..."
+          mcpdev version
+
+          resolved="${{ steps.setup-version.outputs.version }}"
+          echo "Resolved to $resolved"
+
+          if [[ "${{ matrix.version }}" != "latest" && "$resolved" != "${{ matrix.version }}" ]]; then
+            echo "Expected ${{ matrix.version }}, got $resolved"
+            exit 1
+          fi
+
+  test-version-prefix:
+    name: Test version prefix resolution
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Test setup mcpdev (v0)
+        uses: ./
+        id: setup-prefix
+        with:
+          version: 'v0'
+
+      - name: Verify prefix resolution
+        run: |
+          resolved="${{ steps.setup-prefix.outputs.version }}"
+          echo "Resolved v0 to $resolved"
+
+          if [[ ! "$resolved" =~ ^v0\.[0-9]+\.[0-9]+$ ]]; then
+            echo "v0 did not resolve to a v0.x.y release"
+            exit 1
+          fi
+
+          mcpdev version
+
+  test-caching:
+    name: Test caching functionality
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: First installation (should download)
+        uses: ./
+        id: first-install
+        with:
+          version: 'latest'
+          cache: 'true'
+
+      - name: Verify first installation
+        run: |
+          echo "First install cache hit: ${{ steps.first-install.outputs.cache-hit }}"
+          mcpdev version
+
+      - name: Second installation (should use the local cache)
+        uses: ./
+        id: second-install
+        with:
+          version: 'latest'
+          cache: 'true'
+
+      - name: Verify the second installation reused the binary
+        run: |
+          echo "Second install cache hit: ${{ steps.second-install.outputs.cache-hit }}"
+          mcpdev version
+
+          first_path="${{ steps.first-install.outputs.path }}"
+          second_path="${{ steps.second-install.outputs.path }}"
+          if [[ "$first_path" != "$second_path" ]]; then
+            echo "Second installation moved the binary: $first_path -> $second_path"
+            exit 1
+          fi
+
+          # Note: cache-hit can stay false on the first run of a repository because
+          # GitHub Actions saves the cache at the end of the job.
+
+  test-no-cache:
+    name: Test without caching
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install without cache
+        uses: ./
+        id: no-cache
+        with:
+          version: 'latest'
+          cache: 'false'
+
+      - name: Verify installation
+        run: |
+          echo "Cache disabled - cache hit: ${{ steps.no-cache.outputs.cache-hit }}"
+          mcpdev version
+          echo "No-cache test passed"
+
+  test-custom-token:
+    name: Test with custom token
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install with custom token
+        uses: ./
+        id: custom-token
+        with:
+          version: 'latest'
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify installation
+        run: |
+          mcpdev version
+          echo "Custom token test passed"
+
+  integration-test:
+    name: Integration test with real mcpdev commands
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup mcpdev
+        uses: ./
+        id: setup
+        with:
+          version: 'latest'
+
+      - name: Check identity
+        run: |
+          installed="${{ steps.setup.outputs.version }}"
+          echo "Installed mcpdev $installed"
+
+          mcpdev version
+          mcpdev --format json version
+
+          ok=$(mcpdev --format json version | jq -r '.ok')
+          if [[ "$ok" != "true" ]]; then
+            echo "version envelope is not ok"
+            exit 1
+          fi
+
+          # The release archive is built for linux/amd64 on this runner.
+          goos=$(mcpdev --format json version | jq -r '.result.goos')
+          goarch=$(mcpdev --format json version | jq -r '.result.goarch')
+          if [[ "$goos" != "linux" || "$goarch" != "amd64" ]]; then
+            echo "Unexpected target reported by the binary: $goos/$goarch"
+            exit 1
+          fi
+
+      - name: Check that usage errors stay in class 2
+        run: |
+          set +e
+          mcpdev inspect tools --command ./missing-server --url https://example.invalid >/dev/null 2>&1
+          code=$?
+          set -e
+
+          echo "conflicting connections exited $code"
+          if [[ "$code" != "2" ]]; then
+            echo "Expected exit class 2 for conflicting connection flags"
+            exit 1
+          fi
+
+  summary:
+    name: Test Summary
+    needs: [test-platforms, test-versions, test-version-prefix, test-caching, test-no-cache, test-custom-token, integration-test]
+    runs-on: ubuntu-latest
+    if: always()
+
+    steps:
+      - name: Test Results Summary
+        run: |
+          echo "## Test Results Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          results=(
+            "test-platforms:${{ needs.test-platforms.result }}"
+            "test-versions:${{ needs.test-versions.result }}"
+            "test-version-prefix:${{ needs.test-version-prefix.result }}"
+            "test-caching:${{ needs.test-caching.result }}"
+            "test-no-cache:${{ needs.test-no-cache.result }}"
+            "test-custom-token:${{ needs.test-custom-token.result }}"
+            "integration-test:${{ needs.integration-test.result }}"
+          )
+
+          for entry in "${results[@]}"; do
+            name="${entry%%:*}"
+            result="${entry##*:}"
+            if [[ "$result" == "success" ]]; then
+              echo "$name: PASSED" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "$name: FAILED ($result)" >> $GITHUB_STEP_SUMMARY
+            fi
+          done
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Setup mcpdev GitHub Action testing completed." >> $GITHUB_STEP_SUMMARY

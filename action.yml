@@ -1,0 +1,281 @@
+name: 'Setup mcpdev'
+description: 'Install and setup mcpdev - a direct CLI for MCP servers'
+author: 'phillarmonic'
+
+branding:
+  icon: 'terminal'
+  color: 'purple'
+
+inputs:
+  version:
+    description: 'Version of mcpdev to install (e.g., "v0", "v0.1.0", "latest")'
+    required: false
+    default: 'latest'
+
+  token:
+    description: 'GitHub token for API requests (to avoid rate limiting)'
+    required: false
+    default: ${{ github.token }}
+
+  cache:
+    description: 'Enable caching of downloaded binaries'
+    required: false
+    default: 'true'
+
+outputs:
+  version:
+    description: 'The version of mcpdev that was installed'
+    value: ${{ steps.install.outputs.version }}
+
+  path:
+    description: 'Path to the installed mcpdev binary'
+    value: ${{ steps.install.outputs.path }}
+
+  cache-hit:
+    description: 'Whether the binary was restored from cache'
+    value: ${{ steps.cache.outputs.cache-hit }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Determine platform and architecture
+      id: platform
+      shell: bash
+      run: |
+        case "${{ runner.os }}" in
+          Linux)
+            os="linux"
+            ;;
+          macOS)
+            os="darwin"
+            ;;
+          Windows)
+            os="windows"
+            ;;
+          *)
+            echo "::error::Unsupported operating system: ${{ runner.os }}"
+            exit 1
+            ;;
+        esac
+
+        case "${{ runner.arch }}" in
+          X64)
+            arch="amd64"
+            ;;
+          ARM64)
+            arch="arm64"
+            ;;
+          *)
+            echo "::error::Unsupported architecture: ${{ runner.arch }}"
+            exit 1
+            ;;
+        esac
+
+        # Release archives are mcpdev_<version>_<os>_<arch>.tar.gz, or .zip on Windows.
+        if [[ "$os" == "windows" ]]; then
+          archive_ext=".zip"
+          executable_name="mcpdev.exe"
+        else
+          archive_ext=".tar.gz"
+          executable_name="mcpdev"
+        fi
+
+        echo "os=$os" >> "$GITHUB_OUTPUT"
+        echo "arch=$arch" >> "$GITHUB_OUTPUT"
+        echo "archive-ext=$archive_ext" >> "$GITHUB_OUTPUT"
+        echo "executable-name=$executable_name" >> "$GITHUB_OUTPUT"
+        echo "platform=${os}-${arch}" >> "$GITHUB_OUTPUT"
+
+    - name: Resolve version
+      id: version
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.token }}
+      run: |
+        requested_version="${{ inputs.version }}"
+
+        if [[ "$requested_version" == "latest" ]]; then
+          echo "Fetching latest release version..."
+          latest_version=$(curl -sSf \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/phillarmonic/mcpdev/releases/latest" \
+            | jq -r '.tag_name')
+
+          if [[ -z "$latest_version" || "$latest_version" == "null" ]]; then
+            echo "::error::Failed to fetch latest version"
+            exit 1
+          fi
+
+          echo "version=$latest_version" >> "$GITHUB_OUTPUT"
+          echo "Latest version: $latest_version"
+        elif [[ "$requested_version" =~ ^v[0-9]+$ || "$requested_version" =~ ^v[0-9]+\.[0-9]+$ ]]; then
+          echo "Resolving release prefix: $requested_version"
+          if [[ "$requested_version" =~ ^v[0-9]+$ ]]; then
+            version_pattern="^${requested_version//./\\.}\.[0-9]+\.[0-9]+$"
+          else
+            version_pattern="^${requested_version//./\\.}\.[0-9]+$"
+          fi
+
+          matching_version=$(curl -sSf \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/phillarmonic/mcpdev/releases?per_page=100" \
+            | jq -r '.[] | select(.draft == false and .prerelease == false) | .tag_name' \
+            | grep -E "$version_pattern" \
+            | sort -V \
+            | tail -n 1)
+
+          if [[ -z "$matching_version" ]]; then
+            echo "::error::Failed to resolve version prefix: $requested_version"
+            echo "::error::Please check available releases: https://github.com/phillarmonic/mcpdev/releases"
+            exit 1
+          fi
+
+          echo "version=$matching_version" >> "$GITHUB_OUTPUT"
+          echo "Resolved $requested_version to $matching_version"
+        else
+          echo "version=$requested_version" >> "$GITHUB_OUTPUT"
+          echo "Using specified version: $requested_version"
+        fi
+
+    - name: Setup cache
+      id: cache
+      if: inputs.cache == 'true'
+      uses: actions/cache@v6
+      with:
+        path: ${{ runner.temp }}/mcpdev-${{ steps.platform.outputs.platform }}
+        key: mcpdev-${{ steps.version.outputs.version }}-${{ steps.platform.outputs.platform }}
+        restore-keys: |
+          mcpdev-${{ steps.version.outputs.version }}-${{ steps.platform.outputs.platform }}
+
+    - name: Download and install mcpdev
+      id: install
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.token }}
+      run: |
+        set -euo pipefail
+
+        version="${{ steps.version.outputs.version }}"
+        version_no_v="${version#v}"
+        os="${{ steps.platform.outputs.os }}"
+        arch="${{ steps.platform.outputs.arch }}"
+        platform="${{ steps.platform.outputs.platform }}"
+        archive_ext="${{ steps.platform.outputs.archive-ext }}"
+        executable_name="${{ steps.platform.outputs.executable-name }}"
+
+        install_dir="$RUNNER_TEMP/mcpdev-bin"
+        binary_path="$install_dir/$executable_name"
+        cache_path="$RUNNER_TEMP/mcpdev-$platform"
+        mkdir -p "$install_dir"
+
+        if [[ "${{ inputs.cache }}" == "true" && -f "$cache_path" ]]; then
+          echo "Using cached binary..."
+          cp "$cache_path" "$binary_path"
+          chmod +x "$binary_path"
+        else
+          download_dir="$RUNNER_TEMP/mcpdev-download"
+          rm -rf "$download_dir"
+          mkdir -p "$download_dir"
+
+          archive_name="mcpdev_${version_no_v}_${os}_${arch}${archive_ext}"
+          archive_url="https://github.com/phillarmonic/mcpdev/releases/download/${version}/${archive_name}"
+          sums_url="https://github.com/phillarmonic/mcpdev/releases/download/${version}/SHA256SUMS"
+
+          echo "Downloading mcpdev $version for $platform..."
+          if ! curl -fsSL "$archive_url" -o "$download_dir/$archive_name"; then
+            echo "::error::Failed to download mcpdev from $archive_url"
+            echo "::error::Please check if the release exists: https://github.com/phillarmonic/mcpdev/releases/tag/$version"
+            exit 1
+          fi
+          if ! curl -fsSL "$sums_url" -o "$download_dir/SHA256SUMS"; then
+            echo "::error::Failed to download SHA256SUMS from $sums_url"
+            exit 1
+          fi
+
+          file_sha256() {
+            if command -v sha256sum >/dev/null 2>&1; then
+              sha256sum "$1" | awk '{print $1}'
+            elif command -v shasum >/dev/null 2>&1; then
+              shasum -a 256 "$1" | awk '{print $1}'
+            elif command -v openssl >/dev/null 2>&1; then
+              openssl dgst -sha256 "$1" | awk '{print $NF}'
+            else
+              powershell -NoProfile -NonInteractive -Command "(Get-FileHash -Algorithm SHA256 -LiteralPath '$1').Hash.ToLower()"
+            fi
+          }
+
+          expected_sum=$(awk -v name="$archive_name" '$2 == name {print $1}' "$download_dir/SHA256SUMS")
+          if [[ -z "$expected_sum" ]]; then
+            echo "::error::$archive_name is not listed in SHA256SUMS"
+            exit 1
+          fi
+          actual_sum=$(file_sha256 "$download_dir/$archive_name")
+          if [[ "$actual_sum" != "$expected_sum" ]]; then
+            echo "::error::Checksum mismatch for $archive_name"
+            echo "::error::Expected $expected_sum"
+            echo "::error::Actual   $actual_sum"
+            exit 1
+          fi
+          echo "Checksum verified."
+
+          extract_dir="$download_dir/extract"
+          mkdir -p "$extract_dir"
+          if [[ "$archive_ext" == ".zip" ]]; then
+            if command -v cygpath >/dev/null 2>&1; then
+              archive_win=$(cygpath -w "$download_dir/$archive_name")
+              extract_win=$(cygpath -w "$extract_dir")
+            else
+              archive_win="$download_dir/$archive_name"
+              extract_win="$extract_dir"
+            fi
+            powershell -NoProfile -NonInteractive -Command "Expand-Archive -LiteralPath '$archive_win' -DestinationPath '$extract_win' -Force"
+          else
+            tar -xzf "$download_dir/$archive_name" -C "$extract_dir"
+          fi
+
+          if [[ ! -f "$extract_dir/$executable_name" ]]; then
+            echo "::error::$executable_name is not present in $archive_name"
+            exit 1
+          fi
+
+          mv "$extract_dir/$executable_name" "$binary_path"
+          chmod +x "$binary_path"
+
+          if [[ "${{ inputs.cache }}" == "true" ]]; then
+            cp "$binary_path" "$cache_path"
+          fi
+        fi
+
+        # The archive is stamped from its release tag, so the reported version must match.
+        echo "Verifying installation..."
+        installed_version=$("$binary_path" --format json version | jq -r '.result.version')
+        if [[ -z "$installed_version" || "$installed_version" == "null" ]]; then
+          echo "::error::Downloaded binary did not report a version"
+          exit 1
+        fi
+        if [[ "$installed_version" != "$version_no_v" ]]; then
+          echo "::error::Installed binary reports $installed_version, expected $version_no_v"
+          exit 1
+        fi
+
+        echo "$install_dir" >> "$GITHUB_PATH"
+        echo "version=$installed_version" >> "$GITHUB_OUTPUT"
+        echo "path=$binary_path" >> "$GITHUB_OUTPUT"
+
+        echo "mcpdev $installed_version installed successfully."
+        echo "Installed to: $binary_path"
+        echo "Added to PATH: $install_dir"
+
+    - name: Verify mcpdev is available
+      shell: bash
+      run: |
+        echo "Verifying mcpdev is available in PATH..."
+        if command -v mcpdev >/dev/null 2>&1; then
+          echo "mcpdev is available in PATH."
+          mcpdev version
+        else
+          echo "::error::mcpdev is not available in PATH"
+          exit 1
+        fi
