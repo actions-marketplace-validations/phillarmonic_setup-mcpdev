@@ -70,15 +70,15 @@ jobs:
       - name: Verify exit classes
         shell: bash
         run: |
-          # A connection that cannot start is connection class (10), not a crash.
+          # A connection that cannot be established is connection class (10), not a crash.
           set +e
-          mcpdev inspect tools --command /definitely-not-a-command >/dev/null 2>&1
+          mcpdev inspect tools --url http://127.0.0.1:1 >/dev/null 2>&1
           code=$?
           set -e
 
-          echo "inspect with a missing command exited $code"
+          echo "inspect against a closed port exited $code"
           if [[ "$code" != "10" ]]; then
-            echo "Expected exit class 10 for a missing command"
+            echo "Expected exit class 10 for an unreachable endpoint"
             exit 1
           fi
 
