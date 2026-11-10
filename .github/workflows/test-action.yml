@@ -106,11 +106,13 @@ jobs:
           echo "Testing mcpdev ${{ matrix.version }}..."
           mcpdev version
 
+          requested="${{ matrix.version }}"
+          expected="${requested#v}"
           resolved="${{ steps.setup-version.outputs.version }}"
-          echo "Resolved to $resolved"
+          echo "Resolved $requested to $resolved"
 
-          if [[ "${{ matrix.version }}" != "latest" && "$resolved" != "${{ matrix.version }}" ]]; then
-            echo "Expected ${{ matrix.version }}, got $resolved"
+          if [[ "$requested" != "latest" && "$resolved" != "$expected" ]]; then
+            echo "Expected $expected, got $resolved"
             exit 1
           fi
 
@@ -133,8 +135,8 @@ jobs:
           resolved="${{ steps.setup-prefix.outputs.version }}"
           echo "Resolved v0 to $resolved"
 
-          if [[ ! "$resolved" =~ ^v0\.[0-9]+\.[0-9]+$ ]]; then
-            echo "v0 did not resolve to a v0.x.y release"
+          if [[ ! "$resolved" =~ ^0\.[0-9]+\.[0-9]+$ ]]; then
+            echo "v0 did not resolve to a 0.x.y release"
             exit 1
           fi
 

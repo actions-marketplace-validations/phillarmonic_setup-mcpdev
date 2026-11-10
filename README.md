@@ -81,6 +81,8 @@ This resolves to the newest stable `v0.x.y` release. Prefixes with two component
 | `path`      | Path to the installed mcpdev binary        |
 | `cache-hit` | Whether the binary was restored from cache |
 
+`version` is the string the binary reports, without the leading `v` (for example `0.1.0`).
+
 ## Example Workflows
 
 ### CLI Checks in CI
